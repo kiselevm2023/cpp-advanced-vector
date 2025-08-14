@@ -1,4 +1,4 @@
-#pragma once
+ #pragma once
 
 #include <cassert>
 #include <cstdlib>
@@ -26,7 +26,7 @@ public:
     }
 
     RawMemory& operator=(RawMemory&& rhs) noexcept {
-        if (this != & rhs) {
+        if (this != &rhs) {
             Deallocate(buffer_);
 
             buffer_ = std::move(rhs.buffer_);
@@ -165,7 +165,6 @@ public:
         if (this != &rhs) {
             data_ = std::move(rhs.data_);
             size_ = rhs.size_;
-
             rhs.size_ = 0;
         }
         return *this;
@@ -258,11 +257,9 @@ public:
 
     iterator Erase(const_iterator pos) {
         size_t index = pos - data_.GetAddress();
-
         std::move(begin() + index + 1, end(), begin() + index);
         std::destroy_at(end() - 1);
         --size_;
-
         return data_.GetAddress() + index;
     }
 
@@ -272,27 +269,41 @@ private:
 
     template <typename... Args>
     iterator EmplaceWithReallocation(const_iterator pos, Args&&... args) {
+        assert(pos >= begin() && pos <= end());
+
         size_t index = pos - data_.GetAddress();
         size_t new_capacity = size_ == 0 ? 1 : size_ * 2;
         RawMemory<T> new_data(new_capacity);
 
         new (new_data + index) T(std::forward<Args>(args)...);
 
-        if constexpr (std::is_nothrow_move_constructible_v<T> || !std::is_copy_constructible_v<T>) {
-            std::uninitialized_move_n(data_.GetAddress(), index, new_data.GetAddress());
-        } else {
-            std::uninitialized_copy_n(data_.GetAddress(), index, new_data.GetAddress());
+        try {
+            if constexpr (std::is_nothrow_move_constructible_v<T> || !std::is_copy_constructible_v<T>) {
+                std::uninitialized_move_n(data_.GetAddress(), index, new_data.GetAddress());
+            } else {
+                std::uninitialized_copy_n(data_.GetAddress(), index, new_data.GetAddress());
+            }
+        } catch (...) {
+            std::destroy_at(new_data + index);
+            throw;
         }
 
-        if constexpr (std::is_nothrow_move_constructible_v<T> || !std::is_copy_constructible_v<T>) {
-            std::uninitialized_move_n(data_.GetAddress() + index, size_ - index, new_data.GetAddress() + index + 1);
-        } else {
-            std::uninitialized_copy_n(data_.GetAddress() + index, size_ - index, new_data.GetAddress() + index + 1);
+        try {
+            if constexpr (std::is_nothrow_move_constructible_v<T> || !std::is_copy_constructible_v<T>) {
+                std::uninitialized_move_n(data_.GetAddress() + index, size_ - index,
+                                          new_data.GetAddress() + index + 1);
+            } else {
+                std::uninitialized_copy_n(data_.GetAddress() + index, size_ - index,
+                                          new_data.GetAddress() + index + 1);
+            }
+        } catch (...) {
+            std::destroy_n(new_data.GetAddress(), index);
+            std::destroy_at(new_data + index);
+            throw;
         }
 
         std::destroy_n(data_.GetAddress(), size_);
         data_.Swap(new_data);
-
         ++size_;
         return data_.GetAddress() + index;
     }
